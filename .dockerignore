@@ -1,0 +1,13 @@
+# Lo que no necesita el build de la imagen: hace el contexto mas chico y el build mas rapido
+target/
+.git/
+.github/
+.idea/
+.vscode/
+*.iml
+postman/
+*.md
+Dockerfile
+.dockerignore
+.env
+*.env

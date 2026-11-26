@@ -1,5 +1,6 @@
 package com.bodeganube.ordenes.service;
 
+import com.bodeganube.ordenes.client.InventarioClient;
 import com.bodeganube.ordenes.dto.ActualizarOrdenRequest;
 import com.bodeganube.ordenes.dto.CrearOrdenRequest;
 import com.bodeganube.ordenes.dto.ItemRequest;
@@ -12,10 +13,14 @@ import com.bodeganube.ordenes.model.Orden;
 import com.bodeganube.ordenes.model.OrdenItem;
 import com.bodeganube.ordenes.repository.OrdenRepository;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.HttpClientErrorException;
 
 /**
  * Logica del ciclo de vida del pedido. El controller solo traduce HTTP y delega aqui.
@@ -25,10 +30,14 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional(readOnly = true)
 public class OrdenService {
 
-    private final OrdenRepository ordenRepository;
+    private static final Logger log = LoggerFactory.getLogger(OrdenService.class);
 
-    public OrdenService(OrdenRepository ordenRepository) {
+    private final OrdenRepository ordenRepository;
+    private final InventarioClient inventarioClient;
+
+    public OrdenService(OrdenRepository ordenRepository, InventarioClient inventarioClient) {
         this.ordenRepository = ordenRepository;
+        this.inventarioClient = inventarioClient;
     }
 
     /**
@@ -49,9 +58,24 @@ public class OrdenService {
         orden.setFechaCreacion(LocalDateTime.now());
         request.items().forEach(itemReq -> orden.agregarItem(aItem(itemReq)));
 
-        // En la version con AWS, aqui se invoca a ms-inventario (Circuit Breaker + Retry) para reservar
-        // stock antes de pasar la orden a LISTA_PARA_PICKING. Ver seccion 3.2 del informe de arquitectura.
+        // Regla del caso: si no hay stock, la orden NO queda disponible para picking.
+        orden.setEstado(reservarStock(orden));
         return new OrdenRegistrada(OrdenResponse.de(ordenRepository.save(orden)), true);
+    }
+
+    /**
+     * Para el operario: reintenta la reserva de una orden que quedo PENDIENTE_STOCK porque ms-inventario
+     * no respondio cuando llego el aviso.
+     */
+    @Transactional
+    public OrdenResponse reintentarReserva(Long id) {
+        Orden orden = buscar(id);
+        if (orden.getEstado() != EstadoOrden.PENDIENTE_STOCK) {
+            throw new ReglaNegocioException("Solo se reintenta la reserva de una orden PENDIENTE_STOCK; estado actual: "
+                    + orden.getEstado());
+        }
+        orden.setEstado(reservarStock(orden));
+        return OrdenResponse.de(ordenRepository.save(orden));
     }
 
     /**
@@ -68,7 +92,19 @@ public class OrdenService {
     }
 
     public OrdenResponse obtener(Long id) {
-        return OrdenResponse.de(buscar(id));
+        return obtener(id, null);
+    }
+
+    /**
+     * RF-06: si comercioDelUsuario viene informado (usuario COMERCIO), la orden tiene que ser suya. Si es de
+     * otro comercio se responde 404, igual que si no existiera, para no revelar que ese id existe.
+     */
+    public OrdenResponse obtener(Long id, String comercioDelUsuario) {
+        Orden orden = buscar(id);
+        if (comercioDelUsuario != null && !comercioDelUsuario.equals(orden.getComercioId())) {
+            throw new RecursoNoEncontradoException("No existe la orden " + id);
+        }
+        return OrdenResponse.de(orden);
     }
 
     /** RF-03: ordenes con stock ya reservado, listas para que bodega las prepare. */
@@ -110,6 +146,45 @@ public class OrdenService {
                     + orden.getEstado() + ")");
         }
         ordenRepository.delete(orden);
+    }
+
+    /**
+     * Reserva en ms-inventario cada item de la orden y devuelve el estado que corresponde:
+     * - Todos reservados: LISTA_PARA_PICKING.
+     * - Un producto no existe o no tiene stock (404/409): RECHAZADA_SIN_STOCK, y se libera lo ya reservado.
+     * - Inventario no responde o el circuito esta abierto: PENDIENTE_STOCK, para reintentar despues.
+     */
+    private EstadoOrden reservarStock(Orden orden) {
+        List<OrdenItem> reservados = new ArrayList<>();
+        try {
+            for (OrdenItem item : orden.getItems()) {
+                inventarioClient.reservar(item.getProductoId(), item.getCantidad());
+                reservados.add(item);
+            }
+            log.info("Orden {}: stock reservado para {} item(s), queda LISTA_PARA_PICKING",
+                    orden.getExternalOrderId(), reservados.size());
+            return EstadoOrden.LISTA_PARA_PICKING;
+        } catch (HttpClientErrorException e) {
+            log.info("Orden {}: sin stock ({}), queda RECHAZADA_SIN_STOCK", orden.getExternalOrderId(), e.getStatusCode());
+            liberar(reservados);
+            return EstadoOrden.RECHAZADA_SIN_STOCK;
+        } catch (RuntimeException e) {
+            log.warn("Orden {}: ms-inventario no disponible ({}), queda PENDIENTE_STOCK",
+                    orden.getExternalOrderId(), e.getMessage());
+            liberar(reservados);
+            return EstadoOrden.PENDIENTE_STOCK;
+        }
+    }
+
+    private void liberar(List<OrdenItem> reservados) {
+        for (OrdenItem item : reservados) {
+            try {
+                inventarioClient.liberar(item.getProductoId(), item.getCantidad());
+            } catch (RuntimeException e) {
+                log.error("No se pudo liberar la reserva de {} x{}: {}", item.getProductoId(), item.getCantidad(),
+                        e.getMessage());
+            }
+        }
     }
 
     private Orden buscar(Long id) {

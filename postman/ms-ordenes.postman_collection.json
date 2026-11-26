@@ -1,13 +1,55 @@
 {
   "info": {
-    "_postman_id": "20172b03-e03f-2a81-cd67-2b0f3fc50967",
+    "_postman_id": "e5136995-59b0-506d-a9aa-70a20cab2e0f",
     "name": "BodegaNube - ms-ordenes",
-    "description": "Ciclo de vida del pedido. Ejecutar en orden (Run collection): recibe un aviso de venta, prueba la idempotencia, edita, cambia estados y elimina. El externalOrderId cambia en cada ejecucion.",
+    "description": "Ciclo de vida del pedido con reserva de stock. Requiere ms-ordenes y ms-inventario corriendo (docker compose up en bodeganube-infra). Ejecutar en orden (Run collection): prepara un producto en inventario, recibe un aviso con stock (LISTA_PARA_PICKING), prueba la idempotencia, un aviso sin stock (RECHAZADA_SIN_STOCK), el aislamiento por comercio, las transiciones de estado y la eliminacion.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
     {
-      "name": "Recibir aviso de venta (201)",
+      "name": "Preparar: producto con stock en ms-inventario (201)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set(\"sku\", \"ZAP-42-\" + (Date.now() % 100000));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Responde 201\", () => pm.response.to.have.status(201));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{inventarioUrl}}/api/v1/productos",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"sku\": \"{{sku}}\",\n  \"nombre\": \"Zapatilla talla 42\",\n  \"stockDisponible\": 50\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Aviso con stock: queda LISTA_PARA_PICKING (201)",
       "event": [
         {
           "listen": "prerequest",
@@ -25,7 +67,7 @@
             "exec": [
               "pm.test(\"Responde 201\", () => pm.response.to.have.status(201));",
               "pm.collectionVariables.set(\"ordenId\", pm.response.json().id);",
-              "pm.test(\"pm.response.json().estado === \\\"PENDIENTE_STOCK\\\"\", () => pm.expect(pm.response.json().estado === \"PENDIENTE_STOCK\").to.be.true);"
+              "pm.test(\"pm.response.json().estado === \\\"LISTA_PARA_PICKING\\\"\", () => pm.expect(pm.response.json().estado === \"LISTA_PARA_PICKING\").to.be.true);"
             ]
           }
         }
@@ -38,16 +80,36 @@
             "value": "application/json"
           }
         ],
-        "url": "{{baseUrl}}/api/ordenes",
+        "url": "{{baseUrl}}/api/v1/ordenes",
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"externalOrderId\": \"{{externalOrderId}}\",\n  \"comercioId\": \"comercio-123\",\n  \"items\": [\n    {\n      \"productoId\": \"SKU-1\",\n      \"cantidad\": 2\n    },\n    {\n      \"productoId\": \"SKU-2\",\n      \"cantidad\": 1\n    }\n  ]\n}",
+          "raw": "{\n  \"externalOrderId\": \"{{externalOrderId}}\",\n  \"comercioId\": \"comercio-123\",\n  \"items\": [\n    {\n      \"productoId\": \"{{sku}}\",\n      \"cantidad\": 2\n    }\n  ]\n}",
           "options": {
             "raw": {
               "language": "json"
             }
           }
         }
+      }
+    },
+    {
+      "name": "Stock reservado en ms-inventario (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Responde 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"pm.response.json().stockReservado === 2\", () => pm.expect(pm.response.json().stockReservado === 2).to.be.true);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{inventarioUrl}}/api/v1/productos/{{sku}}"
       }
     },
     {
@@ -72,10 +134,10 @@
             "value": "application/json"
           }
         ],
-        "url": "{{baseUrl}}/api/ordenes",
+        "url": "{{baseUrl}}/api/v1/ordenes",
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"externalOrderId\": \"{{externalOrderId}}\",\n  \"comercioId\": \"comercio-123\",\n  \"items\": [\n    {\n      \"productoId\": \"SKU-1\",\n      \"cantidad\": 2\n    },\n    {\n      \"productoId\": \"SKU-2\",\n      \"cantidad\": 1\n    }\n  ]\n}",
+          "raw": "{\n  \"externalOrderId\": \"{{externalOrderId}}\",\n  \"comercioId\": \"comercio-123\",\n  \"items\": [\n    {\n      \"productoId\": \"{{sku}}\",\n      \"cantidad\": 2\n    }\n  ]\n}",
           "options": {
             "raw": {
               "language": "json"
@@ -106,7 +168,7 @@
             "value": "application/json"
           }
         ],
-        "url": "{{baseUrl}}/api/ordenes",
+        "url": "{{baseUrl}}/api/v1/ordenes",
         "body": {
           "mode": "raw",
           "raw": "{\n  \"externalOrderId\": \"shopify-sin-items\",\n  \"comercioId\": \"comercio-123\",\n  \"items\": []\n}",
@@ -119,14 +181,59 @@
       }
     },
     {
-      "name": "Listar ordenes del comercio (200)",
+      "name": "Aviso de un producto sin stock: RECHAZADA_SIN_STOCK (201)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set(\"externalOrderId2\", \"shopify-\" + Date.now() + \"-b\");"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Responde 201\", () => pm.response.to.have.status(201));",
+              "pm.collectionVariables.set(\"ordenId2\", pm.response.json().id);",
+              "pm.test(\"pm.response.json().estado === \\\"RECHAZADA_SIN_STOCK\\\"\", () => pm.expect(pm.response.json().estado === \"RECHAZADA_SIN_STOCK\").to.be.true);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/ordenes",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"externalOrderId\": \"{{externalOrderId2}}\",\n  \"comercioId\": \"comercio-123\",\n  \"items\": [\n    {\n      \"productoId\": \"{{sku}}\",\n      \"cantidad\": 1\n    },\n    {\n      \"productoId\": \"NO-EXISTE\",\n      \"cantidad\": 1\n    }\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Compensacion: la reserva del otro item se libero (200)",
       "event": [
         {
           "listen": "test",
           "script": {
             "type": "text/javascript",
             "exec": [
-              "pm.test(\"Responde 200\", () => pm.response.to.have.status(200));"
+              "pm.test(\"Responde 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"pm.response.json().stockReservado === 2\", () => pm.expect(pm.response.json().stockReservado === 2).to.be.true);"
             ]
           }
         }
@@ -134,7 +241,27 @@
       "request": {
         "method": "GET",
         "header": [],
-        "url": "{{baseUrl}}/api/ordenes?comercioId=comercio-123"
+        "url": "{{inventarioUrl}}/api/v1/productos/{{sku}}"
+      }
+    },
+    {
+      "name": "Listar ordenes del comercio (200)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Responde 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"pm.response.json().every(o => o.comercioId === \\\"comercio-123\\\")\", () => pm.expect(pm.response.json().every(o => o.comercioId === \"comercio-123\")).to.be.true);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/api/v1/ordenes?comercioId=comercio-123"
       }
     },
     {
@@ -146,7 +273,7 @@
             "type": "text/javascript",
             "exec": [
               "pm.test(\"Responde 200\", () => pm.response.to.have.status(200));",
-              "pm.test(\"pm.response.json().items.length === 2\", () => pm.expect(pm.response.json().items.length === 2).to.be.true);"
+              "pm.test(\"pm.response.json().items.length === 1\", () => pm.expect(pm.response.json().items.length === 1).to.be.true);"
             ]
           }
         }
@@ -154,7 +281,31 @@
       "request": {
         "method": "GET",
         "header": [],
-        "url": "{{baseUrl}}/api/ordenes/{{ordenId}}"
+        "url": "{{baseUrl}}/api/v1/ordenes/{{ordenId}}"
+      }
+    },
+    {
+      "name": "Otro comercio no ve la orden (404)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Responde 404\", () => pm.response.to.have.status(404));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Comercio-Id",
+            "value": "comercio-ajeno"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/ordenes/{{ordenId}}"
       }
     },
     {
@@ -173,74 +324,7 @@
       "request": {
         "method": "GET",
         "header": [],
-        "url": "{{baseUrl}}/api/ordenes/999999"
-      }
-    },
-    {
-      "name": "Actualizar items de la orden (200)",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test(\"Responde 200\", () => pm.response.to.have.status(200));",
-              "pm.test(\"pm.response.json().items.length === 1\", () => pm.expect(pm.response.json().items.length === 1).to.be.true);"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "PUT",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "url": "{{baseUrl}}/api/ordenes/{{ordenId}}",
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"items\": [\n    {\n      \"productoId\": \"SKU-1\",\n      \"cantidad\": 3\n    }\n  ]\n}",
-          "options": {
-            "raw": {
-              "language": "json"
-            }
-          }
-        }
-      }
-    },
-    {
-      "name": "Pasar a LISTA_PARA_PICKING (200)",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test(\"Responde 200\", () => pm.response.to.have.status(200));"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "PATCH",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "url": "{{baseUrl}}/api/ordenes/{{ordenId}}/estado",
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"estado\": \"LISTA_PARA_PICKING\"\n}",
-          "options": {
-            "raw": {
-              "language": "json"
-            }
-          }
-        }
+        "url": "{{baseUrl}}/api/v1/ordenes/999999"
       }
     },
     {
@@ -260,7 +344,59 @@
       "request": {
         "method": "GET",
         "header": [],
-        "url": "{{baseUrl}}/api/ordenes/disponibles-picking"
+        "url": "{{baseUrl}}/api/v1/ordenes/disponibles-picking"
+      }
+    },
+    {
+      "name": "Editar items fuera de PENDIENTE_STOCK (409)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Responde 409\", () => pm.response.to.have.status(409));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/ordenes/{{ordenId}}",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"items\": [\n    {\n      \"productoId\": \"SKU-9\",\n      \"cantidad\": 1\n    }\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Reintentar reserva de una orden que no esta pendiente (409)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Responde 409\", () => pm.response.to.have.status(409));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": "{{baseUrl}}/api/v1/ordenes/{{ordenId}}/reservar-stock"
       }
     },
     {
@@ -284,7 +420,7 @@
             "value": "application/json"
           }
         ],
-        "url": "{{baseUrl}}/api/ordenes/{{ordenId}}/estado",
+        "url": "{{baseUrl}}/api/v1/ordenes/{{ordenId}}/estado",
         "body": {
           "mode": "raw",
           "raw": "{\n  \"estado\": \"PENDIENTE_STOCK\"\n}",
@@ -317,43 +453,10 @@
             "value": "application/json"
           }
         ],
-        "url": "{{baseUrl}}/api/ordenes/{{ordenId}}/estado",
+        "url": "{{baseUrl}}/api/v1/ordenes/{{ordenId}}/estado",
         "body": {
           "mode": "raw",
           "raw": "{\n  \"estado\": \"EXTRAVIADA\"\n}",
-          "options": {
-            "raw": {
-              "language": "json"
-            }
-          }
-        }
-      }
-    },
-    {
-      "name": "Editar items fuera de PENDIENTE_STOCK (409)",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test(\"Responde 409\", () => pm.response.to.have.status(409));"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "PUT",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "url": "{{baseUrl}}/api/ordenes/{{ordenId}}",
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"items\": [\n    {\n      \"productoId\": \"SKU-9\",\n      \"cantidad\": 1\n    }\n  ]\n}",
           "options": {
             "raw": {
               "language": "json"
@@ -383,7 +486,7 @@
             "value": "application/json"
           }
         ],
-        "url": "{{baseUrl}}/api/ordenes/{{ordenId}}/estado",
+        "url": "{{baseUrl}}/api/v1/ordenes/{{ordenId}}/estado",
         "body": {
           "mode": "raw",
           "raw": "{\n  \"estado\": \"EN_PICKING\"\n}",
@@ -411,54 +514,11 @@
       "request": {
         "method": "DELETE",
         "header": [],
-        "url": "{{baseUrl}}/api/ordenes/{{ordenId}}"
+        "url": "{{baseUrl}}/api/v1/ordenes/{{ordenId}}"
       }
     },
     {
-      "name": "Recibir otro aviso para eliminarlo (201)",
-      "event": [
-        {
-          "listen": "prerequest",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.collectionVariables.set(\"externalOrderId2\", \"shopify-\" + Date.now() + \"-b\");"
-            ]
-          }
-        },
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test(\"Responde 201\", () => pm.response.to.have.status(201));",
-              "pm.collectionVariables.set(\"ordenId2\", pm.response.json().id);"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "url": "{{baseUrl}}/api/ordenes",
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"externalOrderId\": \"{{externalOrderId2}}\",\n  \"comercioId\": \"comercio-123\",\n  \"items\": [\n    {\n      \"productoId\": \"SKU-3\",\n      \"cantidad\": 1\n    }\n  ]\n}",
-          "options": {
-            "raw": {
-              "language": "json"
-            }
-          }
-        }
-      }
-    },
-    {
-      "name": "Eliminar orden pendiente (204)",
+      "name": "Eliminar orden rechazada (204)",
       "event": [
         {
           "listen": "test",
@@ -473,7 +533,7 @@
       "request": {
         "method": "DELETE",
         "header": [],
-        "url": "{{baseUrl}}/api/ordenes/{{ordenId2}}"
+        "url": "{{baseUrl}}/api/v1/ordenes/{{ordenId2}}"
       }
     }
   ],
@@ -481,6 +541,14 @@
     {
       "key": "baseUrl",
       "value": "http://localhost:8082"
+    },
+    {
+      "key": "inventarioUrl",
+      "value": "http://localhost:8083"
+    },
+    {
+      "key": "sku",
+      "value": ""
     },
     {
       "key": "externalOrderId",

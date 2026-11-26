@@ -1,0 +1,176 @@
+# =====================================================================================================
+# CI/CD de ms-ordenes - Caso BodegaNube (JVY0101)
+#
+#   Pull request a develop o main  ->  1. Build y test: compila y ejecuta las pruebas con Maven (CI).
+#   Push a develop                 ->  1 + 2. Imagen Docker publicada en GitHub Container Registry (etiqueta develop).
+#   Push a main (merge del PR)     ->  1 + 2 (etiquetas latest y sha-<commit>) + 3. Despliegue en el cluster
+#                                      Docker Swarm de AWS (rolling update) y verificacion de que responde.
+#
+# Secretos de la organizacion que usa el despliegue: SWARM_HOST (IP publica del manager) y SWARM_SSH_KEY
+# (contenido de labsuser.pem del Learner Lab). Si faltan, la etapa 3 se omite con una advertencia.
+# =====================================================================================================
+name: CI/CD ms-ordenes
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+env:
+  SERVICIO: ms-ordenes
+  STACK: bodeganube
+  # Ruta publica que confirma que el servicio quedo arriba en el cluster (pasa por el gateway)
+  RUTA_SALUD: estado/ms-ordenes
+
+# No se cancelan ejecuciones a medias: un despliegue cortado puede dejar el servicio a mitad de actualizar
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # --------------------------------------------------------------------------------------------------
+  build-test:
+    name: 1. Build y test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Descargar el codigo
+        uses: actions/checkout@v4
+
+      - name: Instalar JDK 17 (con cache de dependencias Maven)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Compilar y ejecutar las pruebas
+        run: |
+          chmod +x mvnw
+          ./mvnw -B verify
+
+      - name: Guardar el reporte de pruebas
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reporte-pruebas-${{ env.SERVICIO }}
+          path: target/surefire-reports/
+          retention-days: 7
+
+  # --------------------------------------------------------------------------------------------------
+  imagen:
+    name: 2. Imagen Docker (GHCR)
+    needs: build-test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      imagen: ${{ steps.nombre.outputs.imagen }}
+    steps:
+      - name: Descargar el codigo
+        uses: actions/checkout@v4
+
+      - name: Nombre de la imagen (ghcr.io/<organizacion>/<servicio>)
+        id: nombre
+        run: echo "imagen=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${SERVICIO}" >> "$GITHUB_OUTPUT"
+
+      - name: Preparar Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Iniciar sesion en GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Etiquetas de la imagen (trazabilidad con el commit)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.nombre.outputs.imagen }}
+          tags: |
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Construir y publicar la imagen
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Resumen
+        env:
+          ETIQUETAS: ${{ steps.meta.outputs.tags }}
+        run: |
+          echo "### Imagen publicada" >> "$GITHUB_STEP_SUMMARY"
+          echo "$ETIQUETAS" | sed 's/^/- `/; s/$/`/' >> "$GITHUB_STEP_SUMMARY"
+
+  # --------------------------------------------------------------------------------------------------
+  desplegar:
+    name: 3. Despliegue en Docker Swarm (AWS)
+    needs: imagen
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      SWARM_HOST: ${{ secrets.SWARM_HOST }}
+      SWARM_SSH_KEY: ${{ secrets.SWARM_SSH_KEY }}
+      IMAGEN: ${{ needs.imagen.outputs.imagen }}
+    steps:
+      - name: Revisar que el cluster este configurado
+        id: cluster
+        run: |
+          if [ -z "$SWARM_HOST" ] || [ -z "$SWARM_SSH_KEY" ]; then
+            echo "::warning::Faltan los secretos SWARM_HOST o SWARM_SSH_KEY en la organizacion: se omite el despliegue."
+            echo "listo=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "listo=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Preparar la llave SSH del manager
+        if: steps.cluster.outputs.listo == 'true'
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SWARM_SSH_KEY" > ~/.ssh/swarm.pem
+          chmod 600 ~/.ssh/swarm.pem
+
+      - name: Actualizar el servicio en el cluster (rolling update)
+        if: steps.cluster.outputs.listo == 'true'
+        run: |
+          ssh -i ~/.ssh/swarm.pem -o StrictHostKeyChecking=accept-new "ec2-user@$SWARM_HOST" \
+            bash -s -- "${STACK}_${SERVICIO}" "${IMAGEN}:sha-${GITHUB_SHA::7}" <<'REMOTO'
+          set -euo pipefail
+          if ! docker service inspect "$1" > /dev/null 2>&1; then
+            echo "::warning::El servicio $1 todavia no existe: primero se despliega el stack (pipeline de bodeganube-infra)."
+            exit 0
+          fi
+          # Cambia la imagen; Swarm reemplaza las replicas de a una y vuelve atras si la nueva no queda healthy
+          docker service update --image "$2" --with-registry-auth --detach=false "$1"
+          docker service ps "$1" --filter desired-state=running --format 'table {{.Name}}\t{{.Image}}\t{{.Node}}\t{{.CurrentState}}'
+          REMOTO
+
+      - name: Verificar que el servicio responde en la nube
+        if: steps.cluster.outputs.listo == 'true'
+        run: |
+          URL="http://${SWARM_HOST}:8080/${RUTA_SALUD}"
+          for intento in $(seq 1 24); do
+            if RESPUESTA=$(curl -fsS "$URL"); then
+              echo "$URL -> $RESPUESTA"
+              echo "### ${SERVICIO} desplegado: \`${URL}\` responde \`${RESPUESTA}\`" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "Intento $intento: todavia no responde, reintento en 5 s ..."
+            sleep 5
+          done
+          echo "::error::${SERVICIO} no responde en $URL"
+          exit 1

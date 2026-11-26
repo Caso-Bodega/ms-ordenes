@@ -14,6 +14,8 @@ de venta, evita duplicados por reintentos y controla los estados de cada orden h
 - **RF-03**: consulta de las órdenes disponibles para picking.
 - **RF-06**: cada comercio consulta solo sus propias órdenes (Tenant Isolation).
 - **RNF-02**: idempotencia. Un reintento del mismo aviso no crea una segunda orden (*Idempotent Receiver*).
+- **RF-04**: al recibir la orden reserva el stock en ms-inventario. *Si no existe stock disponible, la orden
+  no queda disponible para picking.*
 
 ## Ciclo de vida de una orden
 ```
@@ -23,9 +25,33 @@ PENDIENTE_STOCK ──► LISTA_PARA_PICKING ──► EN_PICKING ──► DESP
 Las transiciones permitidas están en `EstadoOrden.puedeCambiarA`. Cualquier otra responde 409.
 Los ítems solo se pueden editar en `PENDIENTE_STOCK`, y una orden `EN_PICKING` o `DESPACHADA` no se elimina.
 
+## Reserva de stock con ms-inventario
+Cada aviso nuevo reserva sus ítems llamando a `POST /api/v1/productos/{sku}/reservar` de ms-inventario
+(`InventarioClient`, con `RestClient` y timeouts de 2 s para conectar y 3 s para responder):
+
+| Resultado de inventario | Estado de la orden |
+|---|---|
+| Todos los ítems reservados | `LISTA_PARA_PICKING` |
+| Un producto no existe (404) o no tiene stock (409) | `RECHAZADA_SIN_STOCK`, y se **libera** lo que ya se había reservado de los otros ítems (compensación con `POST /liberar`) |
+| Inventario no responde o el circuito está abierto | `PENDIENTE_STOCK`; el operario reintenta con `POST /api/v1/ordenes/{id}/reservar-stock` |
+
+La llamada está protegida con **Resilience4j** (configuración en `application.yml`):
+- **Retry**: hasta 3 intentos cada 500 ms, solo si inventario no respondió (caído, timeout o 5xx). Un 404 o 409
+  es una respuesta de negocio y no se reintenta.
+- **Circuit Breaker**: si al menos la mitad de las últimas 10 llamadas fallan, deja de llamar a inventario por
+  20 s para no saturarlo mientras se recupera. La liberación de reservas no pasa por el circuito, para que
+  nunca queden unidades reservadas de más.
+
+## Aislamiento por comercio (Tenant Isolation)
+Cuando quien consulta es un usuario `COMERCIO`, el gateway agrega la cabecera `X-Comercio-Id` con el comercio
+de su JWT (y borra cualquier cabecera con ese nombre que mande el cliente). ms-ordenes la usa así:
+- `GET /api/v1/ordenes` filtra por ese comercio, aunque la URL pida otro.
+- `GET /api/v1/ordenes/{id}` responde 404 si la orden es de otro comercio (no revela que existe).
+
 ## Arquitectura en capas
 ```
 src/main/java/com/bodeganube/ordenes
+├── client/       InventarioClient            llamada HTTP a ms-inventario con Retry y Circuit Breaker
 ├── controller/   OrdenController             recibe HTTP, valida con @Valid y delega al service
 ├── service/      OrdenService                idempotencia, reglas de estado y transacciones
 ├── repository/   OrdenRepository             Spring Data JPA, con @EntityGraph para evitar N+1
@@ -55,17 +81,18 @@ En código: `Orden` tiene `@OneToMany(mappedBy = "orden", cascade = ALL, orphanR
 Los ítems se guardan y se borran junto con su orden.
 
 ## Endpoints
-Base: `http://localhost:8082` (o `http://localhost:8080` a través de ms-gateway).
+Base: `http://localhost:8082`. A través de ms-gateway (`http://localhost:8080`) todas las rutas piden JWT.
 
 | Método | Ruta | Qué hace | Respuestas |
 |---|---|---|---|
-| POST | `/api/ordenes` | Recibe un aviso de venta | 201 con `Location`; 200 si es un reintento; 400 |
-| GET | `/api/ordenes` | Lista todas; `?comercioId=X` filtra por comercio | 200 |
-| GET | `/api/ordenes/{id}` | Obtiene una orden con sus ítems | 200, 404 |
-| GET | `/api/ordenes/disponibles-picking` | Órdenes en `LISTA_PARA_PICKING` | 200 |
-| PUT | `/api/ordenes/{id}` | Reemplaza los ítems: `{"items": [...]}` | 200, 400, 404, 409 |
-| PATCH | `/api/ordenes/{id}/estado` | Cambia el estado: `{"estado": "LISTA_PARA_PICKING"}` | 200, 400, 404, 409 |
-| DELETE | `/api/ordenes/{id}` | Elimina la orden | 204, 404, 409 si ya está en bodega |
+| POST | `/api/v1/ordenes` | Recibe un aviso de venta y reserva el stock | 201 con `Location`; 200 si es un reintento; 400 |
+| GET | `/api/v1/ordenes` | Lista todas; `?comercioId=X` filtra por comercio | 200 |
+| GET | `/api/v1/ordenes/{id}` | Obtiene una orden con sus ítems | 200, 404 |
+| GET | `/api/v1/ordenes/disponibles-picking` | Órdenes en `LISTA_PARA_PICKING` | 200 |
+| PUT | `/api/v1/ordenes/{id}` | Reemplaza los ítems: `{"items": [...]}` | 200, 400, 404, 409 |
+| POST | `/api/v1/ordenes/{id}/reservar-stock` | Reintenta la reserva de una orden `PENDIENTE_STOCK` | 200, 404, 409 |
+| PATCH | `/api/v1/ordenes/{id}/estado` | Cambia el estado: `{"estado": "LISTA_PARA_PICKING"}` | 200, 400, 404, 409 |
+| DELETE | `/api/v1/ordenes/{id}` | Elimina la orden | 204, 404, 409 si ya está en bodega |
 
 Ejemplo de aviso de venta:
 ```json
@@ -83,7 +110,7 @@ Todas las respuestas de error tienen el mismo formato:
   "status": 409,
   "error": "Conflict",
   "mensaje": "No se puede pasar una orden de EN_PICKING a PENDIENTE_STOCK",
-  "ruta": "/api/ordenes/1/estado"
+  "ruta": "/api/v1/ordenes/1/estado"
 }
 ```
 En los errores de validación (400) se agrega `detalles`, con el mensaje de cada campo inválido.
@@ -97,7 +124,7 @@ En los errores de validación (400) se agrega `detalles`, con el mensaje de cada
 
 ### 2. Clonar el repositorio
 ```bash
-git clone https://github.com/oLUCX/ms-ordenes.git
+git clone https://github.com/Caso-Bodega/ms-ordenes.git
 cd ms-ordenes
 ```
 
@@ -130,10 +157,11 @@ También se puede levantar sin empaquetar con `.\mvnw.cmd spring-boot:run`. Qued
 `http://localhost:8082`.
 
 ### 6. Probar con Postman
-Importa `postman/ms-ordenes.postman_collection.json` (*Import* → archivo) y usa *Run collection*.
-Ejecuta en orden 16 peticiones (aviso de venta, reintento idempotente, consultas, edición, cambios de
-estado y eliminación, más los casos de error 400, 404 y 409) y cada una verifica su código HTTP. Se puede
-repetir: el externalOrderId cambia en cada ejecución.
+Con ms-ordenes **y ms-inventario** corriendo (por ejemplo con `docker compose up` en bodeganube-infra),
+importa `postman/ms-ordenes.postman_collection.json` (*Import* → archivo) y usa *Run collection*. Ejecuta en
+orden 19 peticiones: prepara un producto en inventario, recibe un aviso con stock (`LISTA_PARA_PICKING`),
+prueba la idempotencia, un aviso sin stock (`RECHAZADA_SIN_STOCK` con la reserva liberada), el aislamiento por
+comercio, los cambios de estado y la eliminación, más los casos 400, 404 y 409. Se puede repetir.
 
 Para ver los datos en la base:
 ```sql
@@ -150,18 +178,55 @@ Todo tiene un valor por defecto para desarrollo local y se puede cambiar con var
 | `DB_URL` | `jdbc:postgresql://localhost:5432/bodeganube_ordenes` |
 | `DB_USER` | `postgres` |
 | `DB_PASSWORD` | `postgres` |
+| `INVENTARIO_URL` | `http://localhost:8083` |
 
 ## Pruebas automatizadas
-`.\mvnw.cmd test` corre 15 pruebas que no necesitan base de datos:
-- `OrdenServiceTest` (JUnit 5 + Mockito): idempotencia, transiciones de estado y reglas de edición y borrado.
-- `OrdenControllerTest` (MockMvc): 201 frente a 200 en reintentos, validaciones, 404, 409 y formato de error.
+`.\mvnw.cmd test` corre 21 pruebas que no necesitan base de datos ni a ms-inventario:
+- `OrdenServiceTest` (JUnit 5 + Mockito): idempotencia, reserva de stock (con stock, sin stock con
+  compensación, inventario caído), reintento de la reserva, transiciones de estado, aislamiento por comercio y
+  reglas de edición y borrado.
+- `OrdenControllerTest` (MockMvc): 201 frente a 200 en reintentos, validaciones, filtro por `X-Comercio-Id`,
+  404, 409 y formato de error.
+
+## Docker
+La imagen se construye con el `Dockerfile` de la raíz, en dos etapas:
+
+| Etapa | Imagen base | Qué hace |
+|---|---|---|
+| build | `eclipse-temurin:17-jdk-alpine` | Baja las dependencias (capa que se reutiliza mientras no cambie `pom.xml`), compila y separa el `.jar` en capas |
+| final | `eclipse-temurin:17-jre-alpine` | Solo el JRE y la aplicación en 4 capas, ejecutada por el usuario sin privilegios `bodega` |
+
+Buenas prácticas aplicadas: imagen final de unos 110 MB sin JDK ni código fuente, `.dockerignore` para que el
+contexto de build sea chico, usuario no root, `HEALTHCHECK` contra `/actuator/health/liveness`, apagado
+ordenado (`server.shutdown: graceful`) y la JVM ajustada al límite de memoria del contenedor
+(`-XX:MaxRAMPercentage`).
+
+```bash
+docker build -t ms-ordenes .
+docker run -p 8082:8082 -e DB_URL=jdbc:postgresql://host.docker.internal:5432/bodeganube_ordenes ms-ordenes
+```
+Para levantar el sistema completo (5 microservicios + PostgreSQL) se usa `docker compose up -d --build` en
+[bodeganube-infra](https://github.com/Caso-Bodega/bodeganube-infra). En Docker Swarm las contraseñas llegan como
+secretos en `/run/secrets` y Spring las lee con `spring.config.import=optional:configtree:/run/secrets/`.
+
+## CI/CD (GitHub Actions)
+Pipeline en `.github/workflows/ci-cd.yml`:
+
+| Evento | Etapas |
+|---|---|
+| Pull request a `develop` o `main` | **1. Build y test**: `./mvnw verify` con JDK 17; el reporte de pruebas queda como artefacto |
+| Push a `develop` | 1 + **2. Imagen**: publica `ghcr.io/caso-bodega/ms-ordenes:develop` en GitHub Container Registry |
+| Push a `main` (merge del PR) | 1 + 2 (etiquetas `latest` y `sha-<commit>`) + **3. Despliegue**: `docker service update` en el clúster Swarm de AWS (rolling update con rollback automático) y verificación de `http://<manager>:8080/estado/ms-ordenes` |
+
+La etiqueta `sha-<commit>` dice exactamente qué commit corre en el clúster (trazabilidad). La etapa 3 usa los
+secretos de la organización `SWARM_HOST` y `SWARM_SSH_KEY`; si no existen, se omite con una advertencia.
 
 ## Ramas
 `main` tiene la versión entregada, `develop` integra el trabajo en curso y cada cambio entra desde una
 rama `feature/...` con un Pull Request hacia `develop`.
 
 ## Próximos pasos
-- Reservar stock en ms-inventario al recibir la orden, con Circuit Breaker y Retry (Resilience4j).
+- Reintentar automáticamente las órdenes `PENDIENTE_STOCK` (hoy lo hace el operario con `/reservar-stock`).
 - Publicar un evento en una cola (SQS) cuando la orden queda `LISTA_PARA_PICKING`, en vez de llamar
   directo a ms-picking-despacho (feedback de la Evaluación 1).
 - Si no hay stock, notificar el rechazo al comercio con un webhook de retorno.
