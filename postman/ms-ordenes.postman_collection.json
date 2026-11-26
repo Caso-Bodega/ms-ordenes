@@ -38,7 +38,7 @@
             "value": "application/json"
           }
         ],
-        "url": "{{baseUrl}}/api/ordenes",
+        "url": "{{baseUrl}}/api/v1/ordenes",
         "body": {
           "mode": "raw",
           "raw": "{\n  \"externalOrderId\": \"{{externalOrderId}}\",\n  \"comercioId\": \"comercio-123\",\n  \"items\": [\n    {\n      \"productoId\": \"SKU-1\",\n      \"cantidad\": 2\n    },\n    {\n      \"productoId\": \"SKU-2\",\n      \"cantidad\": 1\n    }\n  ]\n}",
@@ -72,7 +72,7 @@
             "value": "application/json"
           }
         ],
-        "url": "{{baseUrl}}/api/ordenes",
+        "url": "{{baseUrl}}/api/v1/ordenes",
         "body": {
           "mode": "raw",
           "raw": "{\n  \"externalOrderId\": \"{{externalOrderId}}\",\n  \"comercioId\": \"comercio-123\",\n  \"items\": [\n    {\n      \"productoId\": \"SKU-1\",\n      \"cantidad\": 2\n    },\n    {\n      \"productoId\": \"SKU-2\",\n      \"cantidad\": 1\n    }\n  ]\n}",
@@ -106,7 +106,7 @@
             "value": "application/json"
           }
         ],
-        "url": "{{baseUrl}}/api/ordenes",
+        "url": "{{baseUrl}}/api/v1/ordenes",
         "body": {
           "mode": "raw",
           "raw": "{\n  \"externalOrderId\": \"shopify-sin-items\",\n  \"comercioId\": \"comercio-123\",\n  \"items\": []\n}",
@@ -134,7 +134,7 @@
       "request": {
         "method": "GET",
         "header": [],
-        "url": "{{baseUrl}}/api/ordenes?comercioId=comercio-123"
+        "url": "{{baseUrl}}/api/v1/ordenes?comercioId=comercio-123"
       }
     },
     {
@@ -154,7 +154,7 @@
       "request": {
         "method": "GET",
         "header": [],
-        "url": "{{baseUrl}}/api/ordenes/{{ordenId}}"
+        "url": "{{baseUrl}}/api/v1/ordenes/{{ordenId}}"
       }
     },
     {
@@ -173,7 +173,7 @@
       "request": {
         "method": "GET",
         "header": [],
-        "url": "{{baseUrl}}/api/ordenes/999999"
+        "url": "{{baseUrl}}/api/v1/ordenes/999999"
       }
     },
     {
@@ -198,7 +198,7 @@
             "value": "application/json"
           }
         ],
-        "url": "{{baseUrl}}/api/ordenes/{{ordenId}}",
+        "url": "{{baseUrl}}/api/v1/ordenes/{{ordenId}}",
         "body": {
           "mode": "raw",
           "raw": "{\n  \"items\": [\n    {\n      \"productoId\": \"SKU-1\",\n      \"cantidad\": 3\n    }\n  ]\n}",
@@ -231,7 +231,7 @@
             "value": "application/json"
           }
         ],
-        "url": "{{baseUrl}}/api/ordenes/{{ordenId}}/estado",
+        "url": "{{baseUrl}}/api/v1/ordenes/{{ordenId}}/estado",
         "body": {
           "mode": "raw",
           "raw": "{\n  \"estado\": \"LISTA_PARA_PICKING\"\n}",
@@ -260,7 +260,7 @@
       "request": {
         "method": "GET",
         "header": [],
-        "url": "{{baseUrl}}/api/ordenes/disponibles-picking"
+        "url": "{{baseUrl}}/api/v1/ordenes/disponibles-picking"
       }
     },
     {
@@ -284,7 +284,7 @@
             "value": "application/json"
           }
         ],
-        "url": "{{baseUrl}}/api/ordenes/{{ordenId}}/estado",
+        "url": "{{baseUrl}}/api/v1/ordenes/{{ordenId}}/estado",
         "body": {
           "mode": "raw",
           "raw": "{\n  \"estado\": \"PENDIENTE_STOCK\"\n}",
@@ -317,7 +317,7 @@
             "value": "application/json"
           }
         ],
-        "url": "{{baseUrl}}/api/ordenes/{{ordenId}}/estado",
+        "url": "{{baseUrl}}/api/v1/ordenes/{{ordenId}}/estado",
         "body": {
           "mode": "raw",
           "raw": "{\n  \"estado\": \"EXTRAVIADA\"\n}",
@@ -350,7 +350,7 @@
             "value": "application/json"
           }
         ],
-        "url": "{{baseUrl}}/api/ordenes/{{ordenId}}",
+        "url": "{{baseUrl}}/api/v1/ordenes/{{ordenId}}",
         "body": {
           "mode": "raw",
           "raw": "{\n  \"items\": [\n    {\n      \"productoId\": \"SKU-9\",\n      \"cantidad\": 1\n    }\n  ]\n}",
@@ -383,7 +383,7 @@
             "value": "application/json"
           }
         ],
-        "url": "{{baseUrl}}/api/ordenes/{{ordenId}}/estado",
+        "url": "{{baseUrl}}/api/v1/ordenes/{{ordenId}}/estado",
         "body": {
           "mode": "raw",
           "raw": "{\n  \"estado\": \"EN_PICKING\"\n}",
@@ -411,7 +411,7 @@
       "request": {
         "method": "DELETE",
         "header": [],
-        "url": "{{baseUrl}}/api/ordenes/{{ordenId}}"
+        "url": "{{baseUrl}}/api/v1/ordenes/{{ordenId}}"
       }
     },
     {
@@ -445,7 +445,7 @@
             "value": "application/json"
           }
         ],
-        "url": "{{baseUrl}}/api/ordenes",
+        "url": "{{baseUrl}}/api/v1/ordenes",
         "body": {
           "mode": "raw",
           "raw": "{\n  \"externalOrderId\": \"{{externalOrderId2}}\",\n  \"comercioId\": \"comercio-123\",\n  \"items\": [\n    {\n      \"productoId\": \"SKU-3\",\n      \"cantidad\": 1\n    }\n  ]\n}",
@@ -473,7 +473,7 @@
       "request": {
         "method": "DELETE",
         "header": [],
-        "url": "{{baseUrl}}/api/ordenes/{{ordenId2}}"
+        "url": "{{baseUrl}}/api/v1/ordenes/{{ordenId2}}"
       }
     }
   ],

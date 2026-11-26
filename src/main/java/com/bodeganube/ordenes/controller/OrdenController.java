@@ -30,7 +30,7 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
  * RF-06: consulta exclusiva de ordenes propias por comercio (Tenant Isolation).
  */
 @RestController
-@RequestMapping("/api/ordenes")
+@RequestMapping("/api/v1/ordenes")
 public class OrdenController {
 
     private final OrdenService ordenService;
