@@ -41,3 +41,30 @@ management:
     health:
       probes:
         enabled: true
+
+app:
+  inventario:
+    # URL de ms-inventario. En Docker es el nombre del servicio en la red (http://ms-inventario:8083).
+    url: ${INVENTARIO_URL:http://localhost:8083}
+
+resilience4j:
+  retry:
+    instances:
+      inventario:
+        max-attempts: 3
+        wait-duration: 500ms
+        # Solo se reintenta si inventario no respondio. Un 404 o 409 (producto inexistente o sin stock) es
+        # una respuesta valida de negocio: reintentar no la cambia.
+        retry-exceptions:
+          - org.springframework.web.client.ResourceAccessException
+          - org.springframework.web.client.HttpServerErrorException
+  circuitbreaker:
+    instances:
+      inventario:
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 20s
+        permitted-number-of-calls-in-half-open-state: 2
+        ignore-exceptions:
+          - org.springframework.web.client.HttpClientErrorException
