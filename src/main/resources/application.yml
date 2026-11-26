@@ -1,9 +1,18 @@
 server:
   port: ${PORT:8082}
+  # Al detener o actualizar un contenedor, termina las peticiones en curso antes de apagarse.
+  shutdown: graceful
 
 spring:
   application:
     name: ms-ordenes
+  config:
+    # En Docker Swarm los secretos (DB_PASSWORD, JWT_SECRET, WEBHOOK_API_KEY) llegan como archivos en
+    # /run/secrets. configtree los carga como propiedades con el nombre del archivo; si la carpeta no
+    # existe (por ejemplo al correr en local) se ignora.
+    import: optional:configtree:/run/secrets/
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
   datasource:
     # Base de datos propia del microservicio (database-per-service).
     # Los valores por defecto apuntan a un PostgreSQL local; se cambian con variables de entorno.
@@ -20,3 +29,15 @@ spring:
     properties:
       hibernate:
         format_sql: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # Solo se expone la salud. /actuator/health/liveness la usa el HEALTHCHECK de la imagen y
+        # /actuator/health (incluye la base de datos) la consulta el pipeline despues de desplegar.
+        include: health
+  endpoint:
+    health:
+      probes:
+        enabled: true
