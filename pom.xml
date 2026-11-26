@@ -56,6 +56,18 @@
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
 
+        <!-- Resilience4j: Retry y Circuit Breaker en la llamada a ms-inventario -->
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-spring-boot3</artifactId>
+            <version>2.2.0</version>
+        </dependency>
+        <!-- AOP: hace funcionar las anotaciones @Retry y @CircuitBreaker -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-aop</artifactId>
+        </dependency>
+
         <!-- Pruebas: JUnit 5, Mockito, AssertJ y MockMvc -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

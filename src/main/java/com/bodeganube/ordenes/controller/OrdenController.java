@@ -88,6 +88,12 @@ public class OrdenController {
         return ordenService.cambiarEstado(id, request.estado());
     }
 
+    /** Reintenta la reserva de stock de una orden que quedo PENDIENTE_STOCK (inventario no respondio). */
+    @PostMapping("/{id}/reservar-stock")
+    public OrdenResponse reintentarReserva(@PathVariable Long id) {
+        return ordenService.reintentarReserva(id);
+    }
+
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void eliminar(@PathVariable Long id) {
