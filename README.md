@@ -59,13 +59,13 @@ Base: `http://localhost:8082` (o `http://localhost:8080` a través de ms-gateway
 
 | Método | Ruta | Qué hace | Respuestas |
 |---|---|---|---|
-| POST | `/api/ordenes` | Recibe un aviso de venta | 201 con `Location`; 200 si es un reintento; 400 |
-| GET | `/api/ordenes` | Lista todas; `?comercioId=X` filtra por comercio | 200 |
-| GET | `/api/ordenes/{id}` | Obtiene una orden con sus ítems | 200, 404 |
-| GET | `/api/ordenes/disponibles-picking` | Órdenes en `LISTA_PARA_PICKING` | 200 |
-| PUT | `/api/ordenes/{id}` | Reemplaza los ítems: `{"items": [...]}` | 200, 400, 404, 409 |
-| PATCH | `/api/ordenes/{id}/estado` | Cambia el estado: `{"estado": "LISTA_PARA_PICKING"}` | 200, 400, 404, 409 |
-| DELETE | `/api/ordenes/{id}` | Elimina la orden | 204, 404, 409 si ya está en bodega |
+| POST | `/api/v1/ordenes` | Recibe un aviso de venta | 201 con `Location`; 200 si es un reintento; 400 |
+| GET | `/api/v1/ordenes` | Lista todas; `?comercioId=X` filtra por comercio | 200 |
+| GET | `/api/v1/ordenes/{id}` | Obtiene una orden con sus ítems | 200, 404 |
+| GET | `/api/v1/ordenes/disponibles-picking` | Órdenes en `LISTA_PARA_PICKING` | 200 |
+| PUT | `/api/v1/ordenes/{id}` | Reemplaza los ítems: `{"items": [...]}` | 200, 400, 404, 409 |
+| PATCH | `/api/v1/ordenes/{id}/estado` | Cambia el estado: `{"estado": "LISTA_PARA_PICKING"}` | 200, 400, 404, 409 |
+| DELETE | `/api/v1/ordenes/{id}` | Elimina la orden | 204, 404, 409 si ya está en bodega |
 
 Ejemplo de aviso de venta:
 ```json
@@ -83,7 +83,7 @@ Todas las respuestas de error tienen el mismo formato:
   "status": 409,
   "error": "Conflict",
   "mensaje": "No se puede pasar una orden de EN_PICKING a PENDIENTE_STOCK",
-  "ruta": "/api/ordenes/1/estado"
+  "ruta": "/api/v1/ordenes/1/estado"
 }
 ```
 En los errores de validación (400) se agrega `detalles`, con el mensaje de cada campo inválido.
