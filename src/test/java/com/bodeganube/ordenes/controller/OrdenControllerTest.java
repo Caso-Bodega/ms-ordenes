@@ -76,11 +76,23 @@ class OrdenControllerTest {
 
     @Test
     void obtenerOrdenInexistenteDevuelve404() throws Exception {
-        when(ordenService.obtener(99L)).thenThrow(new RecursoNoEncontradoException("No existe la orden 99"));
+        when(ordenService.obtener(99L, null)).thenThrow(new RecursoNoEncontradoException("No existe la orden 99"));
 
         mockMvc.perform(get("/api/v1/ordenes/99"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.mensaje").value("No existe la orden 99"));
+    }
+
+    @Test
+    void comercioSoloListaSusOrdenesAunqueMandeOtroComercioEnLaUrl() throws Exception {
+        when(ordenService.listar("comercio-123")).thenReturn(List.of(orden(EstadoOrden.LISTA_PARA_PICKING)));
+
+        mockMvc.perform(get("/api/v1/ordenes").param("comercioId", "comercio-ajeno")
+                        .header(OrdenController.X_COMERCIO_ID, "comercio-123"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].comercioId").value("comercio-123"));
+
+        verify(ordenService).listar("comercio-123");
     }
 
     @Test

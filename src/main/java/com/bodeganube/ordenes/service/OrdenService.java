@@ -68,7 +68,19 @@ public class OrdenService {
     }
 
     public OrdenResponse obtener(Long id) {
-        return OrdenResponse.de(buscar(id));
+        return obtener(id, null);
+    }
+
+    /**
+     * RF-06: si comercioDelUsuario viene informado (usuario COMERCIO), la orden tiene que ser suya. Si es de
+     * otro comercio se responde 404, igual que si no existiera, para no revelar que ese id existe.
+     */
+    public OrdenResponse obtener(Long id, String comercioDelUsuario) {
+        Orden orden = buscar(id);
+        if (comercioDelUsuario != null && !comercioDelUsuario.equals(orden.getComercioId())) {
+            throw new RecursoNoEncontradoException("No existe la orden " + id);
+        }
+        return OrdenResponse.de(orden);
     }
 
     /** RF-03: ordenes con stock ya reservado, listas para que bodega las prepare. */
