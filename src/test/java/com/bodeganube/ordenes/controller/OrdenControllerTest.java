@@ -49,9 +49,9 @@ class OrdenControllerTest {
         when(ordenService.recibirAvisoDeVenta(any(CrearOrdenRequest.class)))
                 .thenReturn(new OrdenRegistrada(orden(EstadoOrden.PENDIENTE_STOCK), true));
 
-        mockMvc.perform(post("/api/ordenes").contentType(MediaType.APPLICATION_JSON).content(AVISO))
+        mockMvc.perform(post("/api/v1/ordenes").contentType(MediaType.APPLICATION_JSON).content(AVISO))
                 .andExpect(status().isCreated())
-                .andExpect(header().string("Location", endsWith("/api/ordenes/1")))
+                .andExpect(header().string("Location", endsWith("/api/v1/ordenes/1")))
                 .andExpect(jsonPath("$.items[0].productoId").value("SKU-1"));
     }
 
@@ -60,14 +60,14 @@ class OrdenControllerTest {
         when(ordenService.recibirAvisoDeVenta(any(CrearOrdenRequest.class)))
                 .thenReturn(new OrdenRegistrada(orden(EstadoOrden.PENDIENTE_STOCK), false));
 
-        mockMvc.perform(post("/api/ordenes").contentType(MediaType.APPLICATION_JSON).content(AVISO))
+        mockMvc.perform(post("/api/v1/ordenes").contentType(MediaType.APPLICATION_JSON).content(AVISO))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(1));
     }
 
     @Test
     void avisoSinItemsDevuelve400ConDetalle() throws Exception {
-        mockMvc.perform(post("/api/ordenes")
+        mockMvc.perform(post("/api/v1/ordenes")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"externalOrderId\":\"shopify-002\",\"comercioId\":\"comercio-123\",\"items\":[]}"))
                 .andExpect(status().isBadRequest())
@@ -78,7 +78,7 @@ class OrdenControllerTest {
     void obtenerOrdenInexistenteDevuelve404() throws Exception {
         when(ordenService.obtener(99L)).thenThrow(new RecursoNoEncontradoException("No existe la orden 99"));
 
-        mockMvc.perform(get("/api/ordenes/99"))
+        mockMvc.perform(get("/api/v1/ordenes/99"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.mensaje").value("No existe la orden 99"));
     }
@@ -88,7 +88,7 @@ class OrdenControllerTest {
         when(ordenService.cambiarEstado(1L, EstadoOrden.PENDIENTE_STOCK))
                 .thenThrow(new ReglaNegocioException("No se puede pasar una orden de DESPACHADA a PENDIENTE_STOCK"));
 
-        mockMvc.perform(patch("/api/ordenes/1/estado")
+        mockMvc.perform(patch("/api/v1/ordenes/1/estado")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"estado\":\"PENDIENTE_STOCK\"}"))
                 .andExpect(status().isConflict());
@@ -96,7 +96,7 @@ class OrdenControllerTest {
 
     @Test
     void estadoDesconocidoDevuelve400() throws Exception {
-        mockMvc.perform(patch("/api/ordenes/1/estado")
+        mockMvc.perform(patch("/api/v1/ordenes/1/estado")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"estado\":\"EXTRAVIADA\"}"))
                 .andExpect(status().isBadRequest());
@@ -104,7 +104,7 @@ class OrdenControllerTest {
 
     @Test
     void eliminarDevuelve204() throws Exception {
-        mockMvc.perform(delete("/api/ordenes/1"))
+        mockMvc.perform(delete("/api/v1/ordenes/1"))
                 .andExpect(status().isNoContent());
 
         verify(ordenService).eliminar(1L);
