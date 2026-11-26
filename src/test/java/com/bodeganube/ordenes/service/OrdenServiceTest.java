@@ -108,6 +108,15 @@ class OrdenServiceTest {
     }
 
     @Test
+    void unComercioNoVeLaOrdenDeOtroComercio() {
+        when(ordenRepository.findById(1L)).thenReturn(Optional.of(orden(1L, EstadoOrden.LISTA_PARA_PICKING)));
+
+        assertThat(ordenService.obtener(1L, "comercio-123").id()).isEqualTo(1L);
+        assertThatThrownBy(() -> ordenService.obtener(1L, "comercio-ajeno"))
+                .isInstanceOf(RecursoNoEncontradoException.class);
+    }
+
+    @Test
     void lasOrdenesFinalizadasNoCambianDeEstado() {
         assertThat(EstadoOrden.DESPACHADA.puedeCambiarA(EstadoOrden.EN_PICKING)).isFalse();
         assertThat(EstadoOrden.RECHAZADA_SIN_STOCK.puedeCambiarA(EstadoOrden.LISTA_PARA_PICKING)).isFalse();

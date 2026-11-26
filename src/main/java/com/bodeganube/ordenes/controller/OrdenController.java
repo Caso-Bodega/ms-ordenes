@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -32,6 +33,12 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 @RestController
 @RequestMapping("/api/v1/ordenes")
 public class OrdenController {
+
+    /**
+     * Cabecera que agrega el Spring Cloud Gateway con el comercioId del JWT cuando quien consulta es un
+     * usuario COMERCIO. El gateway borra cualquier cabecera con este nombre que mande el cliente.
+     */
+    public static final String X_COMERCIO_ID = "X-Comercio-Id";
 
     private final OrdenService ordenService;
 
@@ -53,14 +60,17 @@ public class OrdenController {
         return ResponseEntity.created(ubicacion).body(registro.orden());
     }
 
+    /** RF-06: si la consulta viene de un COMERCIO, se filtra por su comercio y no por el de la URL. */
     @GetMapping
-    public List<OrdenResponse> listar(@RequestParam(required = false) String comercioId) {
-        return ordenService.listar(comercioId);
+    public List<OrdenResponse> listar(@RequestParam(required = false) String comercioId,
+                                      @RequestHeader(value = X_COMERCIO_ID, required = false) String comercioDelToken) {
+        return ordenService.listar(comercioDelToken != null ? comercioDelToken : comercioId);
     }
 
     @GetMapping("/{id}")
-    public OrdenResponse obtener(@PathVariable Long id) {
-        return ordenService.obtener(id);
+    public OrdenResponse obtener(@PathVariable Long id,
+                                 @RequestHeader(value = X_COMERCIO_ID, required = false) String comercioDelToken) {
+        return ordenService.obtener(id, comercioDelToken);
     }
 
     @GetMapping("/disponibles-picking")
